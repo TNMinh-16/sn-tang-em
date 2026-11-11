@@ -798,10 +798,27 @@ function canStartHold(event) {
     return !(target && target.closest && target.closest('button, a, input, .music-toggle-button'));
 }
 
+// ---- XOAY KHÔNG GIAN 3D THEO HƯỚNG CHUỘT & CẢM ỨNG TAY ----
+let targetHoverYaw = 0;
+let targetHoverPitch = 0;
+let dragYaw = 0;
+let dragPitch = 0;
+let dragVelocityX = 0;
+let dragVelocityY = 0;
+let currentYaw = 0;
+let currentPitch = 0;
+let lastPointerX = 0;
+let lastPointerY = 0;
+
 function onHoldStart(event) {
     if (!canStartHold(event)) return;
     hold.active = true;
     hold.pointerId = event.pointerId;
+    lastPointerX = event.clientX;
+    lastPointerY = event.clientY;
+    dragVelocityX = 0;
+    dragVelocityY = 0;
+
     // Chạm lại khi lốc cũ chưa tan hết: đi tiếp từ mức đang có thay vì về 0,
     // không thì cả cơn lốc giật nở ra rồi mới siết lại.
     hold.start = performance.now() - hold.progress * HOLD_MS;
@@ -822,12 +839,45 @@ function onHoldStart(event) {
     moveHoldRing();
 }
 
-function onHoldMove(event) {
-    if (!hold.active || event.pointerId !== hold.pointerId) return;
-    hold.screen.x = event.clientX;
-    hold.screen.y = event.clientY;
-    heartCenterAt(event.clientX, event.clientY, hold.centerGoal);
-    moveHoldRing();
+function onPointerMove(event) {
+    if (document.body.classList.contains('intro-open')) return;
+    if (rainExit || isPopupOpen) return;
+
+    if (hold.active && event.pointerId === hold.pointerId) {
+        // Cảm ứng tay vuốt hoặc chuột kéo: xoay góc nhìn 3D
+        const dx = event.clientX - lastPointerX;
+        const dy = event.clientY - lastPointerY;
+        lastPointerX = event.clientX;
+        lastPointerY = event.clientY;
+
+        const sensitivityX = 2.0 / window.innerWidth;
+        const sensitivityY = 1.6 / window.innerHeight;
+
+        const deltaYaw = -dx * sensitivityX;
+        const deltaPitch = dy * sensitivityY;
+
+        dragYaw = THREE.MathUtils.clamp(dragYaw + deltaYaw, -0.75, 0.75);
+        dragPitch = THREE.MathUtils.clamp(dragPitch + deltaPitch, -0.42, 0.42);
+
+        dragVelocityX = deltaYaw * 0.45;
+        dragVelocityY = deltaPitch * 0.45;
+
+        hold.screen.x = event.clientX;
+        hold.screen.y = event.clientY;
+        heartCenterAt(event.clientX, event.clientY, hold.centerGoal);
+        moveHoldRing();
+    } else if (event.pointerType === 'mouse' && !hold.active) {
+        // Chuột di chuyển trên máy tính (hover parallax theo hướng chuột)
+        const nx = (event.clientX / window.innerWidth) - 0.5;
+        const ny = (event.clientY / window.innerHeight) - 0.5;
+        targetHoverYaw = nx * 0.45;
+        targetHoverPitch = -ny * 0.30;
+    }
+}
+
+function onMouseLeave() {
+    targetHoverYaw = 0;
+    targetHoverPitch = 0;
 }
 
 function onHoldEnd(event) {
@@ -940,6 +990,37 @@ function updateRain(dt, now) {
         updateRainFlight(dt, now, rainExit);
         return;
     }
+
+    // Quán tính khi thả tay / thả chuột
+    if (!hold.active) {
+        if (Math.abs(dragVelocityX) > 0.0001 || Math.abs(dragVelocityY) > 0.0001) {
+            dragYaw = THREE.MathUtils.clamp(dragYaw + dragVelocityX, -0.75, 0.75);
+            dragPitch = THREE.MathUtils.clamp(dragPitch + dragVelocityY, -0.42, 0.42);
+            const decay = Math.exp(-dt * 7);
+            dragVelocityX *= decay;
+            dragVelocityY *= decay;
+        }
+    }
+
+    // Góc quay tổng hợp từ kéo/vuốt và di chuột
+    const targetYaw = dragYaw + targetHoverYaw;
+    const targetPitch = dragPitch + targetHoverPitch;
+
+    currentYaw += (targetYaw - currentYaw) * (1 - Math.exp(-dt * 6.5));
+    currentPitch += (targetPitch - currentPitch) * (1 - Math.exp(-dt * 6.5));
+
+    // Cập nhật vị trí camera quay quanh gốc tọa độ (0, 0, 0)
+    const baseDist = Math.hypot(RAIN.camX, RAIN.camZ);
+    const baseYaw = Math.atan2(RAIN.camX, RAIN.camZ);
+    const yaw = baseYaw + currentYaw;
+    const pitch = currentPitch;
+    const cosPitch = Math.cos(pitch);
+
+    camera.position.x = baseDist * Math.sin(yaw) * cosPitch;
+    camera.position.y = baseDist * Math.sin(pitch);
+    camera.position.z = baseDist * Math.cos(yaw) * cosPitch;
+    camera.lookAt(0, 0, 0);
+
     updateHold(now, dt);
     // Tâm lốc đuổi theo ngón tay.
     hold.center.lerp(hold.centerGoal, 1 - Math.exp(-dt * 10));
@@ -1258,6 +1339,14 @@ function resetRainGather() {
     camera.fov = RAIN.fov;
     camera.updateProjectionMatrix();
     camera.lookAt(0, 0, 0);
+    dragYaw = 0;
+    dragPitch = 0;
+    dragVelocityX = 0;
+    dragVelocityY = 0;
+    targetHoverYaw = 0;
+    targetHoverPitch = 0;
+    currentYaw = 0;
+    currentPitch = 0;
     if (rainGlow) {
         rainGlow.visible = false;
         rainGlow.material.opacity = 0;
@@ -1332,9 +1421,10 @@ function bootRain() {
 
     window.addEventListener('resize', onWindowResize);
     window.addEventListener('pointerdown', onHoldStart);
-    window.addEventListener('pointermove', onHoldMove);
+    window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onHoldEnd);
     window.addEventListener('pointercancel', onHoldEnd);
+    document.addEventListener('mouseleave', onMouseLeave);
     // Giữ tay lâu trên Android bật menu ngữ cảnh, trên desktop là chuột phải.
     window.addEventListener('contextmenu', event => {
         if (!isPopupOpen) event.preventDefault();
