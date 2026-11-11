@@ -167,13 +167,15 @@ function heartPoint(t) {
     return [(x - 50) / 50, ((50 - y) / 50) * (28.8 / 32)];
 }
 
-// Đổi toạ độ màn hình (px) sang điểm trên mặt phẳng z = 0.
+// Đổi toạ độ màn hình (px) sang điểm trên mặt phẳng qua tâm (0,0,0) hướng về camera.
 function screenToWorld(x, y, out) {
     const v = new THREE.Vector3((x / window.innerWidth) * 2 - 1, -(y / window.innerHeight) * 2 + 1, 0.5);
     v.unproject(camera);
     const dir = v.sub(camera.position).normalize();
-    const dist = -camera.position.z / dir.z;
-    return out.copy(camera.position).add(dir.multiplyScalar(dist));
+    const planeNormal = camera.position.clone().normalize();
+    const denom = dir.dot(planeNormal);
+    const dist = Math.abs(denom) > 0.0001 ? -camera.position.length() / denom : 30;
+    return out.copy(camera.position).addScaledVector(dir, Math.max(1, dist));
 }
 
 // ---- CHỮ ----
@@ -676,13 +678,16 @@ function updateGalaxyScale() {
 // Chọn vai cho cú gom này: tim đỏ và chữ ở gần ngón tay nhất được gọi vào,
 // còn lại vẫn rơi. Chỉ chọn lại khi cú gom trước đã tan hết.
 function assignGatherRoles() {
+    const camDir = new THREE.Vector3();
+    camera.getWorldDirection(camDir);
     const byDistance = kind => rainItems
         .filter(item => item.kind === kind)
         .map(item => {
             const pos = item.obj.position;
             // Vật sau lưng camera hoặc quá gần ống kính thì không gọi.
-            const behind = pos.z > camera.position.z - 6;
-            const d = Math.hypot(pos.x - hold.center.x, pos.y - hold.center.y) + (behind ? 1e4 : 0);
+            const depth = _probe.copy(pos).sub(camera.position).dot(camDir);
+            const behind = depth < 4;
+            const d = pos.distanceTo(hold.center) + (behind ? 1e4 : 0);
             return { item, d };
         })
         .sort((a, b) => a.d - b.d);
@@ -700,7 +705,7 @@ function assignGatherRoles() {
     const reach = viewWidthAt(0) * 0.9;
     rainItems.forEach(item => {
         const pos = item.obj.position;
-        const d = Math.hypot(pos.x - hold.center.x, pos.y - hold.center.y);
+        const d = pos.distanceTo(hold.center);
         item.delay = Math.min(0.4, (d / reach) * 0.4) + Math.random() * 0.08;
         item.phase = Math.random() * Math.PI * 2;
     });
@@ -844,34 +849,37 @@ function onPointerMove(event) {
     if (rainExit || isPopupOpen) return;
 
     if (hold.active && event.pointerId === hold.pointerId) {
-        // Cảm ứng tay vuốt hoặc chuột kéo: xoay góc nhìn 3D
+        // Cảm ứng tay vuốt hoặc chuột kéo: xoay góc nhìn 3D 360 độ cực nhạy
         const dx = event.clientX - lastPointerX;
         const dy = event.clientY - lastPointerY;
         lastPointerX = event.clientX;
         lastPointerY = event.clientY;
 
-        const sensitivityX = 2.0 / window.innerWidth;
-        const sensitivityY = 1.6 / window.innerHeight;
+        // Tăng độ nhạy để vuốt nhẹ là xoay mượt mà, bao quát 360°
+        const sensitivityX = 4.2 / window.innerWidth;
+        const sensitivityY = 3.6 / window.innerHeight;
 
         const deltaYaw = -dx * sensitivityX;
         const deltaPitch = dy * sensitivityY;
 
-        dragYaw = THREE.MathUtils.clamp(dragYaw + deltaYaw, -0.75, 0.75);
-        dragPitch = THREE.MathUtils.clamp(dragPitch + deltaPitch, -0.42, 0.42);
+        // Yaw không giới hạn: xoay 360 độ liên tục không góc chết
+        dragYaw += deltaYaw;
+        // Pitch: cho phép ngước lên nhìn từ đáy hoặc chúc xuống nhìn từ đỉnh
+        dragPitch = THREE.MathUtils.clamp(dragPitch + deltaPitch, -1.42, 1.42);
 
-        dragVelocityX = deltaYaw * 0.45;
-        dragVelocityY = deltaPitch * 0.45;
+        dragVelocityX = deltaYaw * 0.7;
+        dragVelocityY = deltaPitch * 0.7;
 
         hold.screen.x = event.clientX;
         hold.screen.y = event.clientY;
         heartCenterAt(event.clientX, event.clientY, hold.centerGoal);
         moveHoldRing();
     } else if (event.pointerType === 'mouse' && !hold.active) {
-        // Chuột di chuyển trên máy tính (hover parallax theo hướng chuột)
+        // Chuột di chuyển trên máy tính (hover parallax theo hướng chuột rộng hơn)
         const nx = (event.clientX / window.innerWidth) - 0.5;
         const ny = (event.clientY / window.innerHeight) - 0.5;
-        targetHoverYaw = nx * 0.45;
-        targetHoverPitch = -ny * 0.30;
+        targetHoverYaw = nx * 0.85;
+        targetHoverPitch = -ny * 0.55;
     }
 }
 
@@ -991,12 +999,12 @@ function updateRain(dt, now) {
         return;
     }
 
-    // Quán tính khi thả tay / thả chuột
+    // Quán tính khi thả tay / thả chuột: trôi êm theo vòng xoay
     if (!hold.active) {
         if (Math.abs(dragVelocityX) > 0.0001 || Math.abs(dragVelocityY) > 0.0001) {
-            dragYaw = THREE.MathUtils.clamp(dragYaw + dragVelocityX, -0.75, 0.75);
-            dragPitch = THREE.MathUtils.clamp(dragPitch + dragVelocityY, -0.42, 0.42);
-            const decay = Math.exp(-dt * 7);
+            dragYaw += dragVelocityX;
+            dragPitch = THREE.MathUtils.clamp(dragPitch + dragVelocityY, -1.42, 1.42);
+            const decay = Math.exp(-dt * 4.5);
             dragVelocityX *= decay;
             dragVelocityY *= decay;
         }
@@ -1004,12 +1012,12 @@ function updateRain(dt, now) {
 
     // Góc quay tổng hợp từ kéo/vuốt và di chuột
     const targetYaw = dragYaw + targetHoverYaw;
-    const targetPitch = dragPitch + targetHoverPitch;
+    const targetPitch = THREE.MathUtils.clamp(dragPitch + targetHoverPitch, -1.42, 1.42);
 
-    currentYaw += (targetYaw - currentYaw) * (1 - Math.exp(-dt * 6.5));
-    currentPitch += (targetPitch - currentPitch) * (1 - Math.exp(-dt * 6.5));
+    currentYaw += (targetYaw - currentYaw) * (1 - Math.exp(-dt * 7));
+    currentPitch += (targetPitch - currentPitch) * (1 - Math.exp(-dt * 7));
 
-    // Cập nhật vị trí camera quay quanh gốc tọa độ (0, 0, 0)
+    // Cập nhật vị trí camera quay 360 độ quanh gốc tọa độ (0, 0, 0)
     const baseDist = Math.hypot(RAIN.camX, RAIN.camZ);
     const baseYaw = Math.atan2(RAIN.camX, RAIN.camZ);
     const yaw = baseYaw + currentYaw;
@@ -1035,7 +1043,7 @@ function updateRain(dt, now) {
     const dim = 1 - 0.75 * ease;
     // Vật đang rơi chắn giữa tim và camera thì gần như tắt hẳn.
     const hide = 1 - 0.95 * ease;
-    const frontZ = hold.center.z + 3;
+    const holdDist = hold.center.distanceTo(camera.position);
     // Điện thoại dọc hẹp: co vầng chữ cho khỏi tràn ra ngoài màn hình.
     const haloX = Math.min(GALAXY.haloX, (0.4 * viewWidthAt(0)) / rainHeartSize);
 
@@ -1064,7 +1072,7 @@ function updateRain(dt, now) {
         if (item.g < 0.0005) item.g = 0;
 
         const pos = item.obj.position;
-        const inFront = !item.role && item.rain.z > frontZ;
+        const inFront = gathering && !item.role && (pos.distanceTo(camera.position) < holdDist - 3);
         if (item.g === 0 || !item.role || !rainGalaxy) {
             pos.copy(item.rain);
         } else {
@@ -1085,10 +1093,13 @@ function updateRain(dt, now) {
             const shrink = inFront ? hide : 1;
             item.obj.scale.setScalar(Math.max(0.0001, item.base * (1 - 0.55 * item.g) * shrink));
         } else {
-            // Chữ trên vầng giữ nguyên cỡ để đọc được.
+            // Billboarding: xoay mặt chữ và ảnh luôn hướng về camera để 360° không góc chết
+            item.obj.quaternion.copy(camera.quaternion);
+            if (item.kind === 'photo') {
+                item.obj.rotateZ(item.tilt + Math.sin(rainTime * 0.9 + item.sway) * 0.12);
+            }
             item.obj.scale.set(item.base.x, item.base.y, 1);
             if (item.kind === 'text') rainTextColor(item);
-            else item.obj.rotation.z = item.tilt + Math.sin(rainTime * 0.9 + item.sway) * 0.12;
             item.material.opacity = item.role ? dim + (1 - dim) * item.g : (inFront ? hide : dim);
         }
     });
@@ -1099,17 +1110,22 @@ function updateRain(dt, now) {
 // ---- BAY XUYÊN MƯA ----
 const _look = new THREE.Vector3();
 const _ahead = new THREE.Vector3();
+const _flightRight = new THREE.Vector3();
+const _flightUp = new THREE.Vector3();
 
 // Đặt một vật ra phía trước camera, quanh trục bay, chừa trống ở giữa để
 // không có chữ nào đập thẳng vào mặt.
 function placeInTunnel(vec, near, far, rMin, rMax) {
     const angle = Math.random() * Math.PI * 2;
     const r = rMin + Math.random() * (rMax - rMin);
-    vec.set(
-        camera.position.x + Math.cos(angle) * r * 1.3,
-        camera.position.y + Math.sin(angle) * r,
-        camera.position.z - near - Math.random() * (far - near)
-    );
+    const dist = near + Math.random() * (far - near);
+    const fDir = (rainExit && rainExit.flightDir) ? rainExit.flightDir : new THREE.Vector3(0, 0, -1);
+    const fRight = (rainExit && rainExit.flightRight) ? rainExit.flightRight : new THREE.Vector3(1, 0, 0);
+    const fUp = (rainExit && rainExit.flightUp) ? rainExit.flightUp : new THREE.Vector3(0, 1, 0);
+    vec.copy(camera.position)
+        .addScaledVector(fDir, dist)
+        .addScaledVector(fRight, Math.cos(angle) * r * 1.3)
+        .addScaledVector(fUp, Math.sin(angle) * r);
 }
 
 function updateRainFlight(dt, now, exit) {
@@ -1118,15 +1134,14 @@ function updateRainFlight(dt, now, exit) {
     const p = Math.min(1, t / E.duration);
     const steer = easeInOut(Math.min(1, t / E.steer));
 
-    // Camera: lái vào tâm tim, lao tới nhanh dần, FOV giãn ra.
-    camera.position.set(
-        exit.camFrom.x + (exit.aim.x - exit.camFrom.x) * steer,
-        exit.camFrom.y + (exit.aim.y - exit.camFrom.y) * steer,
-        exit.camFrom.z - E.distance * p * p
-    );
+    // Camera: lái vào tâm tim, lao tới nhanh dần theo hướng bay, FOV giãn ra.
+    camera.position.copy(exit.camFrom)
+        .lerp(exit.aim, steer)
+        .addScaledVector(exit.flightDir, E.distance * p * p);
+
     camera.fov = RAIN.fov + E.fovKick * THREE.MathUtils.smoothstep(p, 0.15, 0.75);
     camera.updateProjectionMatrix();
-    _ahead.set(camera.position.x, camera.position.y, camera.position.z - 10);
+    _ahead.copy(camera.position).addScaledVector(exit.flightDir, 10);
     _look.lerpVectors(exit.lookFrom, _ahead, steer);
     camera.lookAt(_look);
     camera.updateMatrixWorld();
@@ -1140,14 +1155,14 @@ function updateRainFlight(dt, now, exit) {
         const pos = item.obj.position;
         const back = item.exitFrom + (1 - item.exitFrom) * wake;
         item.rain.y -= item.speed * dt * 0.3;
-        if (t > E.tunnelFrom && item.rain.z > camera.position.z + 1) {
+        if (t > E.tunnelFrom && _probe.copy(item.rain).sub(camera.position).dot(exit.flightDir) < -1) {
             placeInTunnel(item.rain, 15, 75, 7, 32);
         }
         if (beat) {
             pos.set(
                 item.rain.x + (item.rain.x - exit.aim.x) * beat,
                 item.rain.y + (item.rain.y - exit.aim.y) * beat,
-                item.rain.z
+                item.rain.z + (item.rain.z - exit.aim.z) * beat
             );
         } else {
             pos.copy(item.rain);
@@ -1156,6 +1171,8 @@ function updateRainFlight(dt, now, exit) {
             item.mesh.rotation.z += 0.6 * dt;
             item.obj.scale.setScalar(Math.max(0.0001, item.base * fadeOut * back));
         } else {
+            item.obj.quaternion.copy(camera.quaternion);
+            if (item.kind === 'photo') item.obj.rotateZ(item.tilt);
             if (item.kind === 'text') rainTextColor(item);
             item.material.opacity = fadeOut * back;
         }
@@ -1172,7 +1189,8 @@ function updateRainFlight(dt, now, exit) {
         const m = attr.array;
         const z0 = rainSparkles.position.z;
         for (let k = 0; k < m.length; k += 3) {
-            if (m[k + 2] + z0 > camera.position.z + 1) {
+            _probe.set(m[k], m[k + 1], m[k + 2] + z0);
+            if (_probe.sub(camera.position).dot(exit.flightDir) < -1) {
                 placeInTunnel(_target, 5, 90, 1, 30);
                 m[k] = _target.x;
                 m[k + 1] = _target.y;
@@ -1255,11 +1273,21 @@ function startRainExit() {
         item.exitFrom = item.kind === 'heart' ? item.obj.scale.x / item.base : item.material.opacity;
     });
 
+    const flightDir = hold.center.clone().sub(camera.position).normalize();
+    if (flightDir.lengthSq() < 0.001) flightDir.set(0, 0, -1);
+
+    const fRight = new THREE.Vector3().crossVectors(flightDir, new THREE.Vector3(0, 1, 0)).normalize();
+    if (fRight.lengthSq() < 0.001) fRight.set(1, 0, 0);
+    const fUp = new THREE.Vector3().crossVectors(fRight, flightDir).normalize();
+
     const exit = {
         start: performance.now(),
         camFrom: camera.position.clone(),
         lookFrom: new THREE.Vector3(0, 0, 0),
         aim: hold.center.clone(),
+        flightDir: flightDir,
+        flightRight: fRight,
+        flightUp: fUp,
         ndc: { x: (sx / window.innerWidth) * 2 - 1, y: -(sy / window.innerHeight) * 2 + 1 },
         timers: [],
         anims: []
