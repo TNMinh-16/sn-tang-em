@@ -1098,6 +1098,8 @@
             font-size: clamp(17px, 2.5vw, 22px);
             line-height: 1.72;
             text-align: center;
+            will-change: transform, opacity;
+            backface-visibility: hidden;
         }
 
         .full-letter-sheet::before {
@@ -1221,6 +1223,8 @@
             background: #fff;
             position: absolute;
             transform-origin: 100% 0;
+            will-change: transform, opacity;
+            backface-visibility: hidden;
             animation: shooting-star-opacity 6s infinite ease-in,
                        shooting-star-pos 6s infinite ease-in;
             box-shadow: 0 0 8px 3px rgba(255, 255, 255, 0.4);
@@ -1402,6 +1406,8 @@
             width: 100%;
             height: 100%;
             perspective: 220px;
+            will-change: transform;
+            backface-visibility: hidden;
         }
 
         .ol-bfly-body {
@@ -1419,6 +1425,8 @@
             width: 50%;
             height: 100%;
             transform-style: preserve-3d;
+            will-change: transform;
+            backface-visibility: hidden;
         }
 
         .ol-bfly-wing svg { display: block; width: 100%; height: 100%; overflow: visible; }
@@ -1918,8 +1926,8 @@
         .full-letter-final-photo img { width: 100%; height: auto; max-height: none; object-fit: contain; }
         .full-letter-final-message { white-space: pre-line; line-height: 1.85; color: var(--ink); font-size: clamp(18px, 2.5vw, 23px); }
         .final-letter-dismiss { position: sticky; top: 0; float: right; z-index: 2; width: 44px; height: 44px; margin-top: -32px; border: 1px solid var(--paper-edge); border-radius: 50%; background: var(--paper); color: var(--ink); font: 28px/1 system-ui; cursor: pointer; }
-        .full-letter.is-open .full-letter-sheet { animation: finalLetterBloom 600ms ease-out both; }
-        @keyframes finalLetterBloom { from { opacity: 0; transform: scale(0.75); } to { opacity: 1; transform: scale(1); } }
+        .full-letter.is-open .full-letter-sheet { animation: finalLetterBloom 600ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+        @keyframes finalLetterBloom { from { opacity: 0; transform: scale3d(0.75, 0.75, 1); } to { opacity: 1; transform: scale3d(1, 1, 1); } }
 
         /* ---- chữ hiện dần theo nét bút ----
            Từng KÝ TỰ một span riêng, hiện lên lần lượt theo animation-delay so
@@ -2236,11 +2244,13 @@
             overflow-y: auto;
             overscroll-behavior: contain;
             -webkit-overflow-scrolling: touch;
-            animation: ol-card-in 0.4s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+            will-change: transform, opacity;
+            backface-visibility: hidden;
+            animation: ol-card-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
         }
 
         .ol-overlay[data-closing="true"] .ol-card {
-            animation: ol-card-out 0.4s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+            animation: ol-card-out 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
         }
 
         .ol-back {
@@ -2400,8 +2410,8 @@
             100% { transform: translate3d(30vw, 6vh, 0) rotate(447deg); }
         }
         @keyframes ol-bfly-bob {
-            from { margin-top: -8px; }
-            to { margin-top: 8px; }
+            from { transform: translate3d(0, -8px, 0); }
+            to { transform: translate3d(0, 8px, 0); }
         }
         @keyframes ol-bfly-flap-l {
             from { transform: rotateY(-8deg); }
@@ -2424,12 +2434,12 @@
         @keyframes ol-overlay-in { from { opacity: 0; } to { opacity: 1; } }
         @keyframes ol-overlay-out { from { opacity: 1; } to { opacity: 0; } }
         @keyframes ol-card-in {
-            from { opacity: 0; transform: translateY(24px) scale(0.96); }
-            to { opacity: 1; transform: translateY(0) scale(1); }
+            from { opacity: 0; transform: translate3d(0, 24px, 0) scale(0.96); }
+            to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
         }
         @keyframes ol-card-out {
-            from { opacity: 1; transform: translateY(0) scale(1); }
-            to { opacity: 0; transform: translateY(16px) scale(0.97); }
+            from { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+            to { opacity: 0; transform: translate3d(0, 16px, 0) scale(0.97); }
         }
 
         /* ---- mobile ---- */
@@ -2900,7 +2910,7 @@
         // không hỏi lại server — sửa server.js không cứu được những máy đó.
         // Đổi query ?v= là đổi URL: trình duyệt coi như file mới và tải lại.
         // (index.html luôn `no-cache` nên số mới này đến tay người xem ngay.)
-        var APP_VERSION = "20261111-v8";
+        var APP_VERSION = "20261111-v9";
         var loading = document.getElementById("loading");
         var cfgId = new URLSearchParams(window.location.search).get("id");
 

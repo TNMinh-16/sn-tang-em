@@ -300,7 +300,9 @@ function hideLoading() {
 
 function createStars() {
     const starsContainer = document.getElementById('stars');
+    if (!starsContainer) return;
     
+    const frag = document.createDocumentFragment();
     for (let i = 0; i < 200; i++) {
         const star = document.createElement('div');
         star.className = 'star';
@@ -309,8 +311,9 @@ function createStars() {
         star.style.width = Math.random() * 3 + 1 + 'px';
         star.style.height = star.style.width;
         star.style.animationDelay = Math.random() * 2 + 's';
-        starsContainer.appendChild(star);
+        frag.appendChild(star);
     }
+    starsContainer.appendChild(frag);
 }
 
 // Create shooting stars
@@ -318,16 +321,18 @@ function createShootingStars() {
     const shootingStarsContainer = document.getElementById('shooting-stars');
     if (!shootingStarsContainer) return;
 
-    // Create multiple shooting stars with random positions and delays
-    const numShootingStars = 20; // Increased number of shooting stars
+    const numShootingStars = 20;
+    const frag = document.createDocumentFragment();
+    const w = window.innerWidth;
+    const h = window.innerHeight;
     
     for (let i = 0; i < numShootingStars; i++) {
         const shootingStar = document.createElement('div');
         shootingStar.className = 'shooting-star';
         
         // Random starting positions (top-right area for diagonal movement)
-        const startX = Math.random() * (window.innerWidth * 0.8) + (window.innerWidth * 0.2);
-        const startY = Math.random() * (window.innerHeight * 0.3);
+        const startX = Math.random() * (w * 0.8) + (w * 0.2);
+        const startY = Math.random() * (h * 0.3);
         
         shootingStar.style.left = startX + 'px';
         shootingStar.style.top = startY + 'px';
@@ -341,10 +346,9 @@ function createShootingStars() {
         shootingStar.style.width = size + 'px';
         shootingStar.style.height = size + 'px';
         
-        shootingStarsContainer.appendChild(shootingStar);
+        frag.appendChild(shootingStar);
     }
-    
-    console.log(`Created ${numShootingStars} shooting stars`);
+    shootingStarsContainer.appendChild(frag);
 }
 
 
@@ -362,10 +366,36 @@ function buildPhotoMarkup(part) {
     // `this.src='./photos/pain'.jpeg'` vỡ cú pháp và fallback chết câm.
     return `<figure class="popup-photo">
                 <img src="${escapeHtml(photo)}" alt=""${dayClass}
+                     decoding="async"
                      data-fallback="${escapeHtml(pickFallbackPhoto(photo))}"
                      onerror="this.onerror=null; this.src=this.dataset.fallback;">
             </figure>`;
 }
+
+// Preload và giải mã (decode) trước toàn bộ ảnh trong background để mượt mà 60-120fps
+function preloadAndDecodeAllImages() {
+    const urls = [
+        ...letter.map(p => p.photo),
+        finalLetter.photo,
+        ...LOCAL_PHOTO_FALLBACKS,
+        './assets/orbit/traitimnew.webp',
+        './tim/heart-watercolor-plum.png',
+        './tim/heart-watercolor-coral.png',
+        './tim/heart-watercolor-pink.png'
+    ].filter(Boolean);
+
+    const unique = [...new Set(urls)];
+    unique.forEach(url => {
+        const img = new Image();
+        img.decoding = 'async';
+        img.src = url;
+        if (typeof img.decode === 'function') {
+            img.decode().catch(() => {});
+        }
+        preloadedPopupImages.push(img);
+    });
+}
+preloadAndDecodeAllImages();
 
 
 // ---- HÌNH TRÁI TIM DÙNG CHUNG ----

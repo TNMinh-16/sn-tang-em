@@ -210,6 +210,7 @@ let heartPool = [];
 let orbitHeartW = 320; // bề rộng khung trái tim chính, đo lại khi resize
 
 function buildHeartPool(container, size) {
+    const frag = document.createDocumentFragment();
     heartPool = Array.from({ length: size }, () => {
         const node = document.createElement('img');
         node.className = 'ol-fountain-heart';
@@ -217,9 +218,10 @@ function buildHeartPool(container, size) {
         node.decoding = 'async';
         node.draggable = false;
         node.setAttribute('aria-hidden', 'true');
-        container.appendChild(node);
+        frag.appendChild(node);
         return { node, busy: false, anim: null };
     });
+    container.appendChild(frag);
 }
 
 function acquireHeart() {
@@ -266,7 +268,7 @@ function spawnFountainHearts(count, options = {}) {
         const scale = options.scale ?? 1;
         const duration = durMin + Math.random() * (durMax - durMin);
         const at = (fx, fy, s, r) =>
-            `translate(-50%, -50%) translate(${(ox + fx).toFixed(1)}px, ${(oy + fy).toFixed(1)}px) scale(${s.toFixed(3)}) rotate(${r.toFixed(1)}deg)`;
+            `translate3d(-50%, -50%, 0) translate3d(${(ox + fx).toFixed(1)}px, ${(oy + fy).toFixed(1)}px, 0) scale(${s.toFixed(3)}) rotate(${r.toFixed(1)}deg)`;
 
         node.src = pickHeartImage();
         node.style.width = `${(size * scale).toFixed(1)}px`;
@@ -324,7 +326,7 @@ function layoutSatellites(rotation) {
         // sin(a) > 0 là nửa dưới của ellipse = nửa phía trước tim chính.
         const depth = (Math.sin(a) + 1) / 2;
         s.node.style.transform =
-            `translate(-50%, -50%) translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) scale(${((0.66 + 0.46 * depth) * fit).toFixed(3)}) rotate(${s.tilt}deg)`;
+            `translate3d(-50%, -50%, 0) translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) scale(${((0.66 + 0.46 * depth) * fit).toFixed(3)}) rotate(${s.tilt}deg)`;
         s.node.style.zIndex = depth > 0.5 ? '7' : '3';
         s.node.style.opacity = ((0.5 + 0.5 * depth) * arrivalProgress(ARRIVAL.satStart, ARRIVAL.satDur)).toFixed(3);
     });
@@ -356,10 +358,20 @@ function spawnHeartEffects(finalBurst = false) {
     }
     const count = orbitDeviceTier().lite ? 6 : 6 + heartCharge;
     const radius = Math.min(burst.clientWidth * (1.15 + heartCharge * 0.08), 300);
+    const frag = document.createDocumentFragment();
     for (let i = 0; i < count; i++) {
         const t = (i * 2 * Math.PI) / count;
-        add(burst, 'ol-heart-particle', Math.cos(t) * radius, Math.sin(t) * radius);
+        const x = Math.cos(t) * radius;
+        const y = Math.sin(t) * radius;
+        const node = document.createElement('span');
+        node.className = 'ol-heart-effect ol-heart-particle';
+        node.style.setProperty('--dx', `${x}px`);
+        node.style.setProperty('--dy', `${y}px`);
+        node.style.animationDelay = '0ms';
+        frag.appendChild(node);
+        setTimeout(() => node.remove(), 2200);
     }
+    burst.appendChild(frag);
 }
 
 // ---- CAO TRÀO: TIM XẾP THÀNH VÀNH TRÁI TIM ----
@@ -372,6 +384,8 @@ function formHeartRing(burst) {
     const count = orbitDeviceTier().lite ? 20 : 36;
     const W = orbitHeartW * HEART_FORM_SCALE;
     const total = HEART_BURST_MS;
+    const frag = document.createDocumentFragment();
+    const nodes = [];
 
     for (let i = 0; i < count; i++) {
         const [nx, ny] = heartCurveNormalized((Math.PI * 2 * i) / count);
@@ -383,19 +397,22 @@ function formHeartRing(burst) {
         const rot = -18 + Math.random() * 36;
         const delay = i * 6;
         const at = (fx, fy, sc, r) =>
-            `translate(-50%, -50%) translate(${fx.toFixed(1)}px, ${fy.toFixed(1)}px) scale(${sc}) rotate(${r.toFixed(1)}deg)`;
+            `translate3d(-50%, -50%, 0) translate3d(${fx.toFixed(1)}px, ${fy.toFixed(1)}px, 0) scale(${sc}) rotate(${r.toFixed(1)}deg)`;
         const bob = (i % 2 ? 1 : -1) * 4;
 
         const node = document.createElement('img');
         node.className = 'ol-heart-effect ol-form-heart';
+        node.decoding = 'async';
         node.src = pickHeartImage();
         node.alt = '';
         node.draggable = false;
         node.style.width = `${size.toFixed(1)}px`;
-        burst.appendChild(node);
-        // Mốc thời gian (phần trăm của `total`) khớp với completeHeartCharge:
-        // 0–33% bay ra đáp chỗ · 33–58% nhún tại chỗ · 58–100% theo cú zoom
-        // bay tản ra xa gấp 2,4 lần.
+        frag.appendChild(node);
+        nodes.push({ node, x, y, rot, delay, bob, at });
+    }
+    burst.appendChild(frag);
+
+    nodes.forEach(({ node, x, y, rot, delay, bob, at }) => {
         node.animate([
             { transform: at(0, 0, 0.2, 0), opacity: 0 },
             { transform: at(x, y, 1.12, rot), opacity: 1, offset: 0.26 },
@@ -404,10 +421,8 @@ function formHeartRing(burst) {
             { transform: at(x, y, 1, rot), opacity: 1, offset: 0.58 },
             { transform: at(x * 2.4, y * 2.4, 1.6, rot * 1.6), opacity: 0 }
         ], { duration: total - delay, delay, easing: 'cubic-bezier(.3, .1, .3, 1)', fill: 'both' });
-        // Lifetime phải phủ hết delay + duration, không thì tim bị gỡ giữa
-        // đường bay (bài học ở plan-03 D).
         setTimeout(() => node.remove(), total + 400);
-    }
+    });
 }
 
 // ---- ZOOM VÀO TRÁI TIM ----
@@ -931,8 +946,8 @@ function buildOrbitScene() {
         const dayClass = part.daylight ? ' is-daylight' : '';
         const fallbackPhoto = pickFallbackPhoto(photo || '');
         const img = photo
-            ? `<img src="${escapeHtml(photo)}" alt="" class="${dayClass.trim()}" onerror="this.onerror=null; this.src='${escapeHtml(fallbackPhoto)}'">`
-            : `<img src="${escapeHtml(fallbackPhoto)}" alt="" class="${dayClass.trim()}">`;
+            ? `<img src="${escapeHtml(photo)}" alt="" decoding="async" class="${dayClass.trim()}" onerror="this.onerror=null; this.src='${escapeHtml(fallbackPhoto)}'">`
+            : `<img src="${escapeHtml(fallbackPhoto)}" alt="" decoding="async" class="${dayClass.trim()}">`;
 
         return `<button type="button" class="ol-token" data-index="${i}"
                         aria-label="Đọc lại ký ức: ${label}">
@@ -1070,10 +1085,15 @@ function buildOrbitScene() {
     // đoán. ResizeObserver bắt được cả trường hợp thanh địa chỉ mobile co lại,
     // thứ mà sự kiện resize của window bỏ sót.
     if (typeof ResizeObserver !== 'undefined' && stage) {
+        let roRaf = null;
         orbitResizeObserver = new ResizeObserver(() => {
-            orbitStageSize = { w: stage.clientWidth, h: stage.clientHeight };
-            if (heartCharge) orbitHeartW = heartCharge.offsetWidth || orbitHeartW;
-            layoutOrbit();
+            if (roRaf) return;
+            roRaf = requestAnimationFrame(() => {
+                roRaf = null;
+                orbitStageSize = { w: stage.clientWidth, h: stage.clientHeight };
+                if (heartCharge) orbitHeartW = heartCharge.offsetWidth || orbitHeartW;
+                layoutOrbit();
+            });
         });
         orbitResizeObserver.observe(stage);
     }
@@ -1127,7 +1147,7 @@ function layoutOrbit() {
         const blur = orbitRound((1 - depth) * 2.6, 1);
 
         token.style.transform =
-            `translate(-50%, -50%) translate(${orbitRound(cx + x, 1)}px, ${orbitRound(cy + y, 1)}px) scale(${orbitRound(crowd * scale * (0.3 + 0.7 * e), 3)})`;
+            `translate3d(-50%, -50%, 0) translate3d(${orbitRound(cx + x, 1)}px, ${orbitRound(cy + y, 1)}px, 0) scale(${orbitRound(crowd * scale * (0.3 + 0.7 * e), 3)})`;
         token.style.zIndex = String(Math.round(80 * depth));
         token.style.opacity = String(orbitRound((0.4 + 0.6 * depth) * e, 3));
         token.style.filter = blur > 0.15 ? `blur(${blur}px)` : 'none';

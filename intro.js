@@ -326,6 +326,7 @@ function createIntroRose(canvas) {
         renderer.render(scene, camera);
         state.raf = requestAnimationFrame(frame);
     };
+    state.frame = frame;
     state.raf = requestAnimationFrame(frame);
     requestAnimationFrame(() => canvas.classList.add('is-shown'));
     return state;
@@ -448,6 +449,8 @@ function burstIntroPetals(intro) {
     const y0 = r.top + r.height * 0.24;
     const H = window.innerHeight;
     const W = window.innerWidth;
+    const frag = document.createDocumentFragment();
+    const petalsData = [];
 
     for (let i = 0; i < INTRO.petals; i++) {
         const el = document.createElement('span');
@@ -458,7 +461,7 @@ function burstIntroPetals(intro) {
         el.style.height = `${size}px`;
         el.style.backgroundImage = `url(${introPetalUrl(i % 3 ? 'petal' : 'petal-b')})`;
         el.style.filter = `brightness(${(0.8 + Math.random() * 0.35).toFixed(2)})`;
-        layer.appendChild(el);
+        frag.appendChild(el);
 
         // Tỏa ra hình quạt hướng lên, rộng theo bề ngang màn hình.
         const angle = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.1;
@@ -469,17 +472,36 @@ function burstIntroPetals(intro) {
         const sway = (Math.random() < 0.5 ? -1 : 1) * (20 + Math.random() * 30);
         const spin = (Math.random() < 0.5 ? -1 : 1) * (360 + Math.random() * 540);
         const dur = 2600 + Math.random() * 1400;
+        const delay = Math.random() * 180;
         const p = (x, y, rot, tilt, s) =>
             `translate3d(${x - size / 2}px, ${y - size / 2}px, 0) rotate(${rot}deg) rotateX(${tilt}deg) scale(${s})`;
 
-        el.animate([
+        petalsData.push({ el, x0, y0, peakX, peakY, endX, sway, spin, dur, delay, p });
+    }
+    layer.appendChild(frag);
+
+    petalsData.forEach(({ el, x0, y0, peakX, peakY, endX, sway, spin, dur, delay, p }) => {
+        const anim = el.animate([
             { transform: p(x0, y0, 0, 0, 0.3), opacity: 0, easing: 'cubic-bezier(0.15, 0.8, 0.3, 1)' },
             { transform: p(peakX, peakY, spin * 0.25, 40, 1), opacity: 1, offset: 0.24, easing: 'cubic-bezier(0.45, 0, 0.75, 0.6)' },
             { transform: p((peakX + endX) / 2 + sway, (peakY + H) / 2, spin * 0.6, -30, 1), opacity: 1, offset: 0.62, easing: 'cubic-bezier(0.4, 0, 0.8, 0.8)' },
             { transform: p(endX - sway, H + 40, spin, 50, 0.9), opacity: 0.85 }
-        ], { duration: dur, delay: Math.random() * 180, fill: 'both' });
-    }
+        ], { duration: dur, delay, fill: 'both' });
+        anim.onfinish = () => el.remove();
+    });
 }
+
+document.addEventListener('visibilitychange', () => {
+    if (!introRose || introRose.stopped) return;
+    if (document.hidden) {
+        if (introRose.raf) {
+            cancelAnimationFrame(introRose.raf);
+            introRose.raf = 0;
+        }
+    } else if (!introRose.raf && introRose.frame) {
+        introRose.raf = requestAnimationFrame(introRose.frame);
+    }
+});
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', setupIntro, { once: true });

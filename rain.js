@@ -391,6 +391,8 @@ function makePolaroidTexture(img) {
     return { texture, aspect: canvas.height / canvas.width };
 }
 
+let hasRainPhotos = false;
+
 function createRainPhotos() {
     const urls = rainPhotoUrls();
     if (!urls.length) return;
@@ -400,6 +402,7 @@ function createRainPhotos() {
     urls.forEach((url, u) => {
         const img = new Image();
         img.crossOrigin = 'anonymous';
+        img.decoding = 'async';
         img.onload = () => {
             let tex;
             try { tex = makePolaroidTexture(img); } catch (e) { return; }
@@ -443,6 +446,7 @@ function createRainPhotos() {
                 mesh.layers.set(RAIN_PHOTO.layer);
                 scene.add(mesh);
                 rainItems.push(item);
+                hasRainPhotos = true;
             }
         };
         img.onerror = () => console.warn('Không tải được ảnh rơi:', url);
@@ -814,6 +818,7 @@ let currentYaw = 0;
 let currentPitch = 0;
 let lastPointerX = 0;
 let lastPointerY = 0;
+let pendingPointer = false;
 
 function onHoldStart(event) {
     if (!canStartHold(event)) return;
@@ -872,8 +877,7 @@ function onPointerMove(event) {
 
         hold.screen.x = event.clientX;
         hold.screen.y = event.clientY;
-        heartCenterAt(event.clientX, event.clientY, hold.centerGoal);
-        moveHoldRing();
+        pendingPointer = true;
     } else if (event.pointerType === 'mouse' && !hold.active) {
         // Chuột di chuyển trên máy tính (hover parallax theo hướng chuột rộng hơn)
         const nx = (event.clientX / window.innerWidth) - 0.5;
@@ -1030,6 +1034,11 @@ function updateRain(dt, now) {
     camera.lookAt(0, 0, 0);
 
     updateHold(now, dt);
+    if (pendingPointer) {
+        heartCenterAt(hold.screen.x, hold.screen.y, hold.centerGoal);
+        moveHoldRing();
+        pendingPointer = false;
+    }
     // Tâm lốc đuổi theo ngón tay.
     hold.center.lerp(hold.centerGoal, 1 - Math.exp(-dt * 10));
 
@@ -1228,7 +1237,7 @@ function animate() {
 // Lượt vẽ thứ hai chỉ cho ảnh rơi, chồng lên khung hình đã có bloom. Tắt nền
 // và autoClear để không xoá mất lượt trước.
 function renderRainPhotos() {
-    if (!rainItems.some(item => item.kind === 'photo')) return;
+    if (!hasRainPhotos) return;
     const background = scene.background;
     scene.background = null;
     renderer.autoClear = false;
@@ -1403,6 +1412,15 @@ function restoreRainSky() {
 }
 
 // ---- KHUNG HÌNH ----
+let rainResizeRafId = null;
+function onWindowResizeThrottled() {
+    if (rainResizeRafId) return;
+    rainResizeRafId = requestAnimationFrame(() => {
+        rainResizeRafId = null;
+        onWindowResize();
+    });
+}
+
 function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -1447,12 +1465,12 @@ function bootRain() {
         }, 900);
     });
 
-    window.addEventListener('resize', onWindowResize);
+    window.addEventListener('resize', onWindowResizeThrottled, { passive: true });
     window.addEventListener('pointerdown', onHoldStart);
-    window.addEventListener('pointermove', onPointerMove);
-    window.addEventListener('pointerup', onHoldEnd);
-    window.addEventListener('pointercancel', onHoldEnd);
-    document.addEventListener('mouseleave', onMouseLeave);
+    window.addEventListener('pointermove', onPointerMove, { passive: true });
+    window.addEventListener('pointerup', onHoldEnd, { passive: true });
+    window.addEventListener('pointercancel', onHoldEnd, { passive: true });
+    document.addEventListener('mouseleave', onMouseLeave, { passive: true });
     // Giữ tay lâu trên Android bật menu ngữ cảnh, trên desktop là chuột phải.
     window.addEventListener('contextmenu', event => {
         if (!isPopupOpen) event.preventDefault();
